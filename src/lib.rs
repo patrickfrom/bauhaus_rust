@@ -11,6 +11,7 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
+    clear_color: wgpu::Color,
     window: Window,
 }
 
@@ -19,7 +20,7 @@ impl State {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: wgpu::Backends::DX12,
             dx12_shader_compiler: Default::default(),
         });
 
@@ -34,15 +35,12 @@ impl State {
         ).await.unwrap();
 
         println!("Graphics Card: {}", adapter.get_info().name);
+        println!("Driver: {}", adapter.get_info().driver);
 
         let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
                 features: wgpu::Features::empty(),
-                limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
-                } else {
-                    wgpu::Limits::default()
-                },
+                limits: wgpu::Limits::default(),
                 label: None,
             },
             None,
@@ -51,10 +49,11 @@ impl State {
         let surface_caps = surface.get_capabilities(&adapter);
 
         let surface_format = surface_caps.formats.iter()
-            .copied()
-            .filter(|f| f.describe().srgb)
-            .next()
-            .unwrap_or(surface_caps.formats[0]);
+        .copied()
+        .filter(|f| f.describe().srgb)
+        .next()
+        .unwrap_or(surface_caps.formats[0]);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -64,7 +63,15 @@ impl State {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
+
         surface.configure(&device, &config);
+
+        let clear_color = wgpu::Color {
+            r: 1.0,
+            g: 0.1,
+            b: 0.1,
+            a: 1.0,
+        };
 
         Self {
             surface,
@@ -72,6 +79,7 @@ impl State {
             queue,
             config,
             size,
+            clear_color,
             window
         }
     }
@@ -90,7 +98,18 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-       false
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                self.clear_color = wgpu::Color {
+                    r: position.x as f64 / self.size.width as f64,
+                    g: 0.1,
+                    b: 0.1,
+                    a: 1.0,
+                };
+                true
+            }
+            _ => false,
+        }
     }
 
     fn update(&mut self) {
@@ -112,12 +131,7 @@ impl State {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 1.0,
-                            g: 0.1,
-                            b: 0.1,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.clear_color),
                         store: true,
                     },
                 })],
@@ -174,7 +188,7 @@ pub async fn run() {
                     Ok(_) => {}
                     Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
                     Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    Err(e) => eprintln!("{:?}", e),
+                    Err(e) => eprintln!("an err: {:?}", e),
                 }
             }
 
